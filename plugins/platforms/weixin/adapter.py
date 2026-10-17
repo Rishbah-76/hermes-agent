@@ -99,14 +99,12 @@ def _make_ssl_connector() -> Optional[aiohttp.TCPConnector]:
     ``enable_cleanup_closed=True`` helps the connector clean up sockets that the remote side has already
     closed.
     """
-    try:
-        import ssl
-        import certifi
-    except ImportError:
+    import ssl
+    from agent.ssl_verify import certifi_bundle_path
+    bundle = certifi_bundle_path()
+    if bundle is None or not AIOHTTP_AVAILABLE:
         return None
-    if not AIOHTTP_AVAILABLE:
-        return None
-    return aiohttp.TCPConnector(ssl=ssl.create_default_context(cafile=certifi.where()), keepalive_timeout=2, enable_cleanup_closed=True)
+    return aiohttp.TCPConnector(ssl=ssl.create_default_context(cafile=bundle), keepalive_timeout=2, enable_cleanup_closed=True)
 
 
 def _new_session(**kwargs: Any) -> aiohttp.ClientSession:

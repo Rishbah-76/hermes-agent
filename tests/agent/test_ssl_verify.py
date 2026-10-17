@@ -314,3 +314,17 @@ def test_requests_verify_never_hands_over_the_deleted_bundle(tmp_path, monkeypat
 
     assert str(verify) != dead
     assert verify is True or Path(str(verify)).exists()
+
+
+@pytest.mark.parametrize("replacement", [True, False])
+def test_nous_auth_verify_survives_a_replaced_install_environment(tmp_path, monkeypatch, no_ca_env, replacement):
+    """Nous OAuth resolves credentials through ``hermes_cli.auth._default_verify``, its own certifi
+    seam. After a rotation it must still yield a verify that httpx can build a client from: the
+    re-derived bundle, or the platform context when nothing re-derives (#137255)."""
+    import httpx
+
+    from hermes_cli.auth_device_flow import _default_verify, _resolve_verify
+
+    _rotated_certifi(tmp_path, monkeypatch, replacement=replacement)
+    for verify in (_default_verify(), _resolve_verify()):
+        httpx.Client(verify=verify).close()

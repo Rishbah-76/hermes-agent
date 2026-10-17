@@ -216,14 +216,16 @@ def _default_verify() -> bool | ssl.SSLContext:
     """Platform-aware default SSL verify for httpx clients.
 
     On macOS with Homebrew Python the system OpenSSL cannot find the system trust store, so pin
-    certifi's bundle when importable; elsewhere defer to httpx's built-in default.
+    certifi's bundle; elsewhere defer to httpx's built-in default. The bundle path is re-derived
+    when an install-environment rotation deleted it, and with no bundle at all the platform
+    context stands in: httpx's own ``True`` would resolve through the same dead path (#137255).
     """
+    from agent.ssl_verify import certifi_bundle_path, platform_ssl_context
+    bundle = certifi_bundle_path()
+    if bundle is None:
+        return platform_ssl_context()
     if sys.platform == "darwin":
-        try:
-            import certifi
-            return ssl.create_default_context(cafile=certifi.where())
-        except ImportError:
-            pass
+        return ssl.create_default_context(cafile=bundle)
     return True
 
 

@@ -33,9 +33,10 @@ class ActualProfile(ProviderProfile):
             )
         ):
             return {}
-        import certifi
+        from agent.ssl_verify import certifi_bundle_path
 
-        return {"ssl_ca_cert": certifi.where()}
+        bundle = certifi_bundle_path()
+        return {"ssl_ca_cert": bundle} if bundle else {}
 
     def supported_reasoning_efforts(self, model: str | None) -> tuple[str, ...] | None:
         from agent.reasoning_effort import ACTUAL_RELAY_EFFORTS

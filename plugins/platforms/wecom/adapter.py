@@ -228,12 +228,8 @@ class WeComAdapter(WeComStreamMixin, WeComMediaMixin, ChatSendQueueMixin, OwnAcc
         await self._cleanup_ws()
         # certifi's CA bundle so aiohttp trusts the same roots as urllib/requests (macOS stale OpenSSL path).
         import ssl as _ssl
-        try:
-            import certifi
-            cafile = certifi.where()
-        except ImportError:
-            cafile = None
-        _ssl_ctx = _ssl.create_default_context(cafile=cafile)
+        from agent.ssl_verify import certifi_bundle_path
+        _ssl_ctx = _ssl.create_default_context(cafile=certifi_bundle_path())
         self._session = aiohttp.ClientSession(trust_env=gateway_trust_env(), connector=aiohttp.TCPConnector(ssl=_ssl_ctx))
         self._ws = await self._session.ws_connect(self._ws_url, heartbeat=HEARTBEAT_INTERVAL_SECONDS * 2, timeout=CONNECT_TIMEOUT_SECONDS)
         req_id = self._new_req_id("subscribe")
