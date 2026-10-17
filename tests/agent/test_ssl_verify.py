@@ -194,12 +194,17 @@ assert ctx.cert_store_stats()['x509_ca'] > 0
 
 
 def _stand_in_certifi_env(root: Path, name: str, bundle: bytes) -> Path:
-    """A certifi package whose bundle sits next to its own ``__file__``."""
+    """A certifi package laid out like the real one: ``where`` re-exported from
+    ``certifi.core``, which caches the path on first call."""
     package = root / name / "certifi"
     package.mkdir(parents=True)
-    (package / "__init__.py").write_text(
-        "import os\n\n\ndef where():\n"
-        "    return os.path.join(os.path.dirname(__file__), 'cacert.pem')\n"
+    (package / "__init__.py").write_text("from .core import where\n")
+    (package / "core.py").write_text(
+        "import os\n\n_CACERT_PATH = None\n\n\ndef where():\n"
+        "    global _CACERT_PATH\n"
+        "    if _CACERT_PATH is None:\n"
+        "        _CACERT_PATH = os.path.join(os.path.dirname(__file__), 'cacert.pem')\n"
+        "    return _CACERT_PATH\n"
     )
     (package / "cacert.pem").write_bytes(bundle)
     return package
@@ -224,6 +229,7 @@ def _rotated_certifi(tmp_path: Path, monkeypatch, *, replacement: bool):
     import sys
 
     import certifi as real_certifi
+    import requests.utils
 
     bundle = Path(real_certifi.where()).read_bytes()  # a real PEM: contexts must load it
     old_env = _stand_in_certifi_env(tmp_path, "env-a", bundle)
@@ -232,10 +238,14 @@ def _rotated_certifi(tmp_path: Path, monkeypatch, *, replacement: bool):
         monkeypatch.syspath_prepend(str(new_env.parent))
     monkeypatch.syspath_prepend(str(old_env.parent))
     monkeypatch.delitem(sys.modules, "certifi", raising=False)
+    monkeypatch.delitem(sys.modules, "certifi.core", raising=False)
     importlib.invalidate_caches()
     stand_in = importlib.import_module("certifi")
     monkeypatch.setitem(sys.modules, "certifi", stand_in)
+    monkeypatch.setitem(sys.modules, "certifi.core", sys.modules["certifi.core"])
     assert Path(stand_in.where()).parent == old_env
+    # requests froze its default bundle path from the same certifi at import.
+    monkeypatch.setattr(requests.utils, "DEFAULT_CA_BUNDLE_PATH", stand_in.where())
     shutil.rmtree(old_env)
     assert not Path(stand_in.where()).exists()
     return stand_in
@@ -328,3 +338,14 @@ def test_nous_auth_verify_survives_a_replaced_install_environment(tmp_path, monk
     _rotated_certifi(tmp_path, monkeypatch, replacement=replacement)
     for verify in (_default_verify(), _resolve_verify()):
         httpx.Client(verify=verify).close()
+
+
+def test_requests_verify_keeps_requests_own_ca_overrides(monkeypatch, no_ca_env):
+    """requests reads ``REQUESTS_CA_BUNDLE`` only for ``verify=True``; a healthy install
+    or a configured override must keep it, or a proxy CA stops being trusted."""
+    from agent import ssl_verify
+
+    assert ssl_verify.requests_verify() is True
+    monkeypatch.setenv("REQUESTS_CA_BUNDLE", "/corp/proxy-ca.pem")
+    monkeypatch.setattr("requests.utils.DEFAULT_CA_BUNDLE_PATH", "/gone/cacert.pem")
+    assert ssl_verify.requests_verify() is True

@@ -184,6 +184,10 @@ def _reload_certifi_bundle() -> Optional[str]:
     # still resolve the old package.
     importlib.invalidate_caches()
     try:
+        # Real certifi re-exports ``where`` from ``certifi.core``, which caches the
+        # path in ``_CACERT_PATH``: re-executing only the package would re-import the
+        # stale submodule. Drop it so the reload resolves it from the live sys.path.
+        sys.modules.pop("certifi.core", None)
         path = importlib.reload(module).where()
     except Exception as exc:  # the reload re-executes third-party module code
         logger.debug("certifi could not be re-resolved: %s", exc, exc_info=True)
@@ -199,8 +203,17 @@ def requests_verify() -> bool | str:
     cannot reach, so a rotated environment leaves every ``requests`` call raising
     ``OSError: Could not find a suitable TLS CA certificate bundle``. The live bundle
     (certifi's, re-derived; else OpenSSL's own default) keeps those calls working;
-    ``True`` only when nothing resolves, which is requests' own default.
+    ``True`` only when nothing resolves, which is requests' own default. A healthy
+    install keeps ``True`` too: requests reads ``REQUESTS_CA_BUNDLE``/``CURL_CA_BUNDLE``
+    only for ``verify=True``, and an explicit path would silently bypass a user's
+    proxy CA.
     """
+    from requests.utils import DEFAULT_CA_BUNDLE_PATH
+
+    if os.environ.get("REQUESTS_CA_BUNDLE") or os.environ.get("CURL_CA_BUNDLE"):
+        return True
+    if Path(DEFAULT_CA_BUNDLE_PATH).is_file():
+        return True
     bundle = certifi_bundle_path()
     if bundle:
         return bundle
